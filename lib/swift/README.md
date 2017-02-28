@@ -49,7 +49,7 @@ dependencies: [
 
 You can compile IDL sources for Swift 3 with the following command:
 
-    thrift --gen swift_3 thrift_file
+    thrift --gen swift thrift_file
 
 ## Client Example
 ```swift
