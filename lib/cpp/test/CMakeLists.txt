@@ -19,11 +19,19 @@
 
 include_directories(SYSTEM "${Boost_INCLUDE_DIRS}")
 
-#Make sure gen-cpp files can be included
+add_definitions("-D__STDC_LIMIT_MACROS")
+
+if (WITH_DYN_LINK_TEST)
+    add_definitions( -DBOOST_TEST_DYN_LINK )
+endif()
+
+# Make sure gen-cpp files can be included
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 
 # Create the thrift C++ test library
 set(testgencpp_SOURCES
+    gen-cpp/AnnotationTest_types.cpp
+    gen-cpp/AnnotationTest_types.h
     gen-cpp/DebugProtoTest_types.cpp
     gen-cpp/DebugProtoTest_types.h
     gen-cpp/EnumTest_types.cpp
@@ -53,7 +61,6 @@ set(testgencpp_cob_SOURCES
     gen-cpp/proc_types.h
 )
 add_library(testgencpp_cob STATIC ${testgencpp_cob_SOURCES})
-
 
 add_executable(Benchmark Benchmark.cpp)
 target_link_libraries(Benchmark testgencpp)
@@ -141,6 +148,13 @@ LINK_AGAINST_THRIFT_LIBRARY(ZlibTest thriftz)
 add_test(NAME ZlibTest COMMAND ZlibTest)
 endif(WITH_ZLIB)
 
+add_executable(AnnotationTest AnnotationTest.cpp)
+target_link_libraries(AnnotationTest
+    testgencpp
+    ${Boost_LIBRARIES}
+)
+LINK_AGAINST_THRIFT_LIBRARY(AnnotationTest thrift)
+add_test(NAME AnnotationTest COMMAND AnnotationTest)
 
 add_executable(EnumTest EnumTest.cpp)
 target_link_libraries(EnumTest
@@ -327,8 +341,16 @@ endif()
 # Common thrift code generation rules
 #
 
+add_custom_command(OUTPUT gen-cpp/AnnotationTest_constants.cpp
+                          gen-cpp/AnnotationTest_constants.h
+                          gen-cpp/AnnotationTest_types.cpp
+                          gen-cpp/AnnotationTest_types.h
+                          gen-cpp/foo_service.cpp
+                          gen-cpp/foo_service.h
+    COMMAND ${THRIFT_COMPILER} --gen cpp ${PROJECT_SOURCE_DIR}/test/AnnotationTest.thrift
+)
 
-add_custom_command(OUTPUT gen-cpp/DebugProtoTest_types.cpp gen-cpp/DebugProtoTest_types.h gen-cpp/EmptyService.cpp  gen-cpp/EmptyService.h
+add_custom_command(OUTPUT gen-cpp/DebugProtoTest_types.cpp gen-cpp/DebugProtoTest_types.h gen-cpp/EmptyService.cpp gen-cpp/EmptyService.h
     COMMAND ${THRIFT_COMPILER} --gen cpp ${PROJECT_SOURCE_DIR}/test/DebugProtoTest.thrift
 )
 

@@ -28,16 +28,19 @@
 #error "This is a Windows header only"
 #endif
 
-// use std::thread in MSVC11 (2012) or newer
-#if _MSC_VER >= 1700
+// use std::thread in MSVC11 (2012) or newer and in MinGW
+#if (_MSC_VER >= 1700) || defined(__MINGW32__)
 #define USE_STD_THREAD 1
 #else
 // otherwise use boost threads
 #define USE_BOOST_THREAD 1
 #endif
 
-// VS2010 or later has stdint.h
-#if _MSC_VER >= 1600
+// Something that defines PRId64 is required to build
+#define HAVE_INTTYPES_H 1
+
+// VS2010 or later has stdint.h as does MinGW
+#if (_MSC_VER >= 1600) || defined(__MINGW32__)
 #define HAVE_STDINT_H 1
 #endif
 
@@ -65,7 +68,6 @@
 
 #pragma warning(disable : 4996) // Deprecated posix name.
 
-#define VERSION "1.0.0-dev"
 #define HAVE_GETTIMEOFDAY 1
 #define HAVE_SYS_STAT_H 1
 

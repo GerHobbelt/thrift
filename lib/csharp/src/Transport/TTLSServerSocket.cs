@@ -108,7 +108,7 @@ namespace Thrift.Transport
             X509Certificate2 certificate,
             RemoteCertificateValidationCallback clientCertValidator = null,
             LocalCertificateSelectionCallback localCertificateSelectionCallback = null,
-            // TODO: Enable Tls1 and Tls2 (TLS 1.1 and 1.2) by default once we start using .NET 4.5+.
+            // TODO: Enable Tls11 and Tls12 (TLS 1.1 and 1.2) by default once we start using .NET 4.5+.
             SslProtocols sslProtocols = SslProtocols.Tls)
         {
             if (!certificate.HasPrivateKey)
@@ -126,8 +126,8 @@ namespace Thrift.Transport
             try
             {
                 // Create server socket
-                server = new TcpListener(System.Net.IPAddress.Any, this.port);
-                server.Server.NoDelay = true;
+                this.server = TSocketVersionizer.CreateTcpListener(port);
+                this.server.Server.NoDelay = true;
             }
             catch (Exception)
             {

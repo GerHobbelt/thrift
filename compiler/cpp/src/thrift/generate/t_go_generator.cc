@@ -25,9 +25,10 @@
  * guide for ensuring uniformity and readability.
  */
 
-#include <string>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <string>
 #include <vector>
 
 #include <stdlib.h>
@@ -433,7 +434,11 @@ std::string t_go_generator::camelcase(const std::string& value) const {
       if (islower(value2[i + 1])) {
         value2.replace(i, 2, 1, toupper(value2[i + 1]));
       }
-      fix_common_initialism(value2, i);
+
+      if (i > static_cast<std::string::size_type>(std::numeric_limits<int>().max())) {
+        throw "integer overflow in t_go_generator::camelcase, value = " + value;
+      }
+      fix_common_initialism(value2, static_cast<int>(i));
     }
   }
 
@@ -877,6 +882,7 @@ string t_go_generator::go_imports_begin(bool consts) {
   return string(
       "import (\n"
       "\t\"bytes\"\n"
+      "\t\"reflect\"\n"
       + extra +
       "\t\"fmt\"\n"
       "\t\"" + gen_thrift_import_ + "\"\n");
@@ -885,7 +891,7 @@ string t_go_generator::go_imports_begin(bool consts) {
 /**
  * End the import statement, include undscore-assignments
  *
- * These "_ =" prevent the go compiler complaining about used imports.
+ * These "_ =" prevent the go compiler complaining about unused imports.
  * This will have to do in lieu of more intelligent import statement construction
  */
 string t_go_generator::go_imports_end() {
@@ -894,6 +900,7 @@ string t_go_generator::go_imports_end() {
       "// (needed to ensure safety because of naive import list construction.)\n"
       "var _ = thrift.ZERO\n"
       "var _ = fmt.Printf\n"
+      "var _ = reflect.DeepEqual\n"
       "var _ = bytes.Equal\n\n");
 }
 
@@ -1150,12 +1157,12 @@ string t_go_generator::render_const_value(t_type* type, t_const_value* value, co
   } else if (type->is_set()) {
     t_type* etype = ((t_set*)type)->get_elem_type();
     const vector<t_const_value*>& val = value->get_list();
-    out << "map[" << type_to_go_key_type(etype) << "]struct{}{" << endl;
+    out << "[]" << type_to_go_key_type(etype) << "{" << endl;
     indent_up();
     vector<t_const_value*>::const_iterator v_iter;
 
     for (v_iter = val.begin(); v_iter != val.end(); ++v_iter) {
-      out << indent() << render_const_value(etype, *v_iter, name) << ": struct{}{}," << endl;
+      out << indent() << render_const_value(etype, *v_iter, name) << ", ";
     }
 
     indent_down();
@@ -1527,9 +1534,15 @@ void t_go_generator::generate_go_struct_reader(ofstream& out,
       thriftFieldTypeId = "thrift.STRING";
     }
 
-    out << indent() << "if err := p." << field_method_prefix << field_method_suffix << "(iprot); err != nil {"
+    out << indent() << "if fieldTypeId == " << thriftFieldTypeId << " {" << endl;
+    out << indent() << "  if err := p." << field_method_prefix << field_method_suffix << "(iprot); err != nil {"
         << endl;
-    out << indent() << "  return err" << endl;
+    out << indent() << "    return err" << endl;
+    out << indent() << "  }" << endl;
+    out << indent() << "} else {" << endl;
+    out << indent() << "  if err := iprot.Skip(fieldTypeId); err != nil {" << endl;
+    out << indent() << "    return err" << endl;
+    out << indent() << "  }" << endl;
     out << indent() << "}" << endl;
 
     // Mark required field as read
@@ -2302,7 +2315,7 @@ void t_go_generator::generate_service_remote(t_service* tservice) {
     f_remote << indent() << "}" << endl;
 
     for (std::vector<t_field*>::size_type i = 0; i < num_args; ++i) {
-      int flagArg = i + 1;
+      std::vector<t_field*>::size_type flagArg = i + 1;
       t_type* the_type(args[i]->get_type());
       t_type* the_type2(get_true_type(the_type));
 
@@ -2969,13 +2982,11 @@ void t_go_generator::generate_deserialize_container(ofstream& out,
     out << indent() << "tMap := make(" << type_to_go_type(orig_type) << ", size)" << endl;
     out << indent() << prefix << eq << " " << (pointer_field ? "&" : "") << "tMap" << endl;
   } else if (ttype->is_set()) {
-    t_set* t = (t_set*)ttype;
     out << indent() << "_, size, err := iprot.ReadSetBegin()" << endl;
     out << indent() << "if err != nil {" << endl;
     out << indent() << "  return thrift.PrependError(\"error reading set begin: \", err)" << endl;
     out << indent() << "}" << endl;
-    out << indent() << "tSet := make(map["
-        << type_to_go_key_type(t->get_elem_type()->get_true_type()) << "]struct{}, size)" << endl;
+    out << indent() << "tSet := make(" << type_to_go_type(orig_type) << ", 0, size)" << endl;
     out << indent() << prefix << eq << " " << (pointer_field ? "&" : "") << "tSet" << endl;
   } else if (ttype->is_list()) {
     out << indent() << "_, size, err := iprot.ReadListBegin()" << endl;
@@ -3054,7 +3065,7 @@ void t_go_generator::generate_deserialize_set_element(ofstream& out,
   t_field felem(tset->get_elem_type(), elem);
   felem.set_req(t_field::T_OPT_IN_REQ_OUT);
   generate_deserialize_field(out, &felem, true, "", false, false, false, true, true);
-  indent(out) << prefix << "[" << elem << "] = struct{}{}" << endl;
+  indent(out) << prefix << " = append(" << prefix << ", " << elem << ")" << endl;
 }
 
 /**
@@ -3213,7 +3224,14 @@ void t_go_generator::generate_serialize_container(ofstream& out,
     indent(out) << "}" << endl;
   } else if (ttype->is_set()) {
     t_set* tset = (t_set*)ttype;
-    out << indent() << "for v, _ := range " << prefix << " {" << endl;
+    out << indent() << "for i := 0; i<len(" << prefix << "); i++ {" << endl;
+    out << indent() << "  for j := i+1; j<len(" << prefix << "); j++ {" << endl;
+    out << indent() << "    if reflect.DeepEqual(" << prefix << "[i]," << prefix << "[j]) { " << endl;
+    out << indent() << "      return thrift.PrependError(\"\", fmt.Errorf(\"%T error writing set field: slice is not unique\", " << prefix << "[i]))" << endl;
+    out << indent() << "    }" << endl;
+    out << indent() << "  }" << endl;
+    out << indent() << "}" << endl;
+    out << indent() << "for _, v := range " << prefix << " {" << endl;
     indent_up();
     generate_serialize_set_element(out, tset, "v");
     indent_down();
@@ -3616,8 +3634,8 @@ string t_go_generator::type_to_go_type_with_opt(t_type* type,
     return maybe_pointer + string("map[") + keyType + "]" + valueType;
   } else if (type->is_set()) {
     t_set* t = (t_set*)type;
-    string elemType = type_to_go_key_type(t->get_elem_type());
-    return maybe_pointer + string("map[") + elemType + string("]struct{}");
+    string elemType = type_to_go_type(t->get_elem_type());
+    return maybe_pointer + string("[]") + elemType;
   } else if (type->is_list()) {
     t_list* t = (t_list*)type;
     string elemType = type_to_go_type(t->get_elem_type());
