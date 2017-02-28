@@ -94,7 +94,6 @@ thrift_SOURCES += src/thrift/generate/t_c_glib_generator.cc \
                   src/thrift/generate/t_erl_generator.cc \
                   src/thrift/generate/t_cocoa_generator.cc \
                   src/thrift/generate/t_swift_generator.cc \
-                  src/thrift/generate/t_swift_3_generator.cc \
                   src/thrift/generate/t_st_generator.cc \
                   src/thrift/generate/t_ocaml_generator.cc \
                   src/thrift/generate/t_hs_generator.cc \
