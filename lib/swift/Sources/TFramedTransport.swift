@@ -51,7 +51,7 @@ public class TFramedTransport: TTransport {
                             message:  "Read a negative frame size (\(size))!")
     }
     
-    if size < maxSize {
+    if size > maxSize {
       try close()
       throw TTransportError(error: .sizeLimit(limit: maxSize, got: size))
     }
