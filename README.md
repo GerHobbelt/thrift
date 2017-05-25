@@ -89,6 +89,17 @@ Acknowledgments
 Thrift was inspired by pillar, a lightweight RPC tool written by Adam D'Angelo,
 and also by Google's protocol buffers.
 
+Run Thrift compiler from Docker
+===============
+It's possible to run all the environment from docker. Just ensure your docker daemon is running, then build an image with:
+```shell
+docker build -t thrift/swift .
+```
+After this step has been completed, to use the new thrift swift compiler with `test.thrift` which is in the same directory, just run:
+```shell
+docker run -v "$PWD:/data" thrift/swift -o /data --gen swift /data/test.thrift
+```
+
 Installation
 ============
 
