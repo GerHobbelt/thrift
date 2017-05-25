@@ -91,7 +91,7 @@ and also by Google's protocol buffers.
 
 Run Thrift compiler from Docker
 ===============
-It's possible to run all the environment from docker. Just ensure your docker daemon is running, then build an image with:
+It's possible to run all the environment from docker. Just ensure your docker daemon is running, then clone this repo, go into its directory from a terminal and build an image with:
 ```shell
 docker build -t thrift/swift .
 ```
