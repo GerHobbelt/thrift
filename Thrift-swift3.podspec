@@ -11,6 +11,6 @@ The Apache Thrift software framework, for scalable cross-language services devel
   s.ios.deployment_target = '9.0'
   s.osx.deployment_target = '10.10'
   s.requires_arc  = true
-  s.source        = { :git => "https://github.com/apache/thrift.git", :tag => "thrift-1.0.0" }
+  s.source        = { :git => "https://github.com/iGenius-Srl/thrift.git", :tag => "thrift-1.0.0" }
   s.source_files  = "lib/swift/Sources/*.swift"
 end
