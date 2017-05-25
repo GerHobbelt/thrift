@@ -64,7 +64,7 @@ extension Stream.PropertyKey {
 
 /// TCFSocketTransport, uses CFSockets and (NS)Stream's
 public class TCFSocketTransport: TStreamTransport {
-    public init?(hostname: String, port: Int, secure: Bool) {
+    public init?(hostname: String, port: Int, secure: Bool = false) {
     
     var inputStream: InputStream
     var outputStream: OutputStream
