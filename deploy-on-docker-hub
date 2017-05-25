@@ -1,0 +1,4 @@
+#!/bin/bash
+docker build -t igenius/thrift-swift3 .
+docker login
+docker push igenius/thrift-swift3
