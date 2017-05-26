@@ -1,5 +1,5 @@
 Pod::Spec.new do |s|
-  s.name         = "Thrift-swift3"
+  s.name         = "Thrift"
   s.version      = "1.1.0"
   s.summary       = "Apache Thrift is a lightweight, language-independent software stack with an associated code generation mechanism for RPC."
   s.description   = <<-DESC
