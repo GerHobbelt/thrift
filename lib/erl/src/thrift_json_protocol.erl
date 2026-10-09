@@ -50,11 +50,15 @@
 -record(json_protocol, {
     transport :: term(),
     context_stack = [] :: [json_context()],
-    jsx :: undefined | jsx()
+    jsx :: undefined | jsx(),
+    % undefined: the thrift application's max_message_size
+    max_message_size :: pos_integer() | undefined
 }).
 
 -define(VERSION_1, 1).
 -define(JSON_DOUBLE_PRECISION, 16).
+%% What has been read of a message is joined into a binary every this many bytes.
+-define(JSON_READ_CHUNK_SIZE, 65536).
 
 typeid_to_json(?tType_BOOL) -> "tf";
 typeid_to_json(?tType_DOUBLE) -> "dbl";
@@ -90,9 +94,26 @@ end_context(array) -> "]".
 new(Transport) ->
     new(Transport, _Options = []).
 
+%%--------------------------------------------------------------------
+%% Options include:
+%%   {max_message_size, Bytes}  = The longest message to read, in place of the
+%%                                thrift application's max_message_size
+%%--------------------------------------------------------------------
+new(Transport, Options) when is_list(Options) ->
+    State = lists:foldl(fun apply_option/2, #json_protocol{transport = Transport}, Options),
+    thrift_protocol:new(?MODULE, State);
 new(Transport, _Options) ->
-    State = #json_protocol{transport = Transport},
-    thrift_protocol:new(?MODULE, State).
+    new(Transport, []).
+
+apply_option({max_message_size, Max}, State) when is_integer(Max), Max > 0 ->
+    State#json_protocol{max_message_size = Max};
+apply_option(_Other, State) ->
+    State.
+
+max_message_size(#json_protocol{max_message_size = undefined}) ->
+    application:get_env(thrift, max_message_size, ?DEFAULT_MAX_MESSAGE_SIZE);
+max_message_size(#json_protocol{max_message_size = Max}) ->
+    Max.
 
 flush_transport(This = #json_protocol{transport = Transport}) ->
     {NewTransport, Result} = thrift_transport:flush(Transport),
@@ -356,8 +377,11 @@ escape_byte(B) -> <<B>>.
 %% transport, and a buffered one over it, waits until it has all the bytes
 %% it was asked for, and the stream goes on with the next message; other
 %% transports, framed among them, return what they have and keep the rest.
+%%
+%% A message longer than max_message_size is refused before more than that
+%% many bytes of it are read.
 read_all(#json_protocol{transport = Transport0} = State) ->
-    case read_message(Transport0, [], 0, false, false) of
+    case read_message(Transport0, max_message_size(State), {0, [], [], 0}, 0, false, false) of
         {Transport1, {ok, Bin}} ->
             P = thrift_json_parser:parser(),
             [First | Rest] = P(Bin),
@@ -366,23 +390,44 @@ read_all(#json_protocol{transport = Transport0} = State) ->
             {State#json_protocol{transport = Transport1}, Error}
     end.
 
-read_message(Transport0, Parts, Depth, InString, Escaped) ->
-    {Transport1, Result} = thrift_transport:read(
-        Transport0, least_left(Depth, InString, Escaped)
-    ),
-    case Result of
-        {ok, <<>>} ->
-            {Transport1, {error, eof}};
-        {ok, Data} ->
-            case scan(Data, Depth, InString, Escaped) of
-                done ->
-                    {Transport1, {ok, iolist_to_binary(lists:reverse([Data | Parts]))}};
-                {Depth1, InString1, Escaped1} ->
-                    read_message(Transport1, [Data | Parts], Depth1, InString1, Escaped1)
-            end;
-        {error, _} = Error ->
-            {Transport1, Error}
+read_message(Transport0, Max, Read = {Size, _, _, _}, Depth, InString, Escaped) ->
+    Least = least_left(Depth, InString, Escaped),
+    case Size + Least > Max of
+        true ->
+            {Transport0, {error, {message_size_exceeds_maximum, Max}}};
+        false ->
+            {Transport1, Result} = thrift_transport:read(Transport0, Least),
+            case Result of
+                {ok, <<>>} ->
+                    {Transport1, {error, eof}};
+                {ok, Data} ->
+                    Read1 = add_read(Data, Read),
+                    case scan(Data, Depth, InString, Escaped) of
+                        done ->
+                            {Transport1, {ok, message_read(Read1)}};
+                        {Depth1, InString1, Escaped1} ->
+                            read_message(Transport1, Max, Read1, Depth1, InString1, Escaped1)
+                    end;
+                {error, _} = Error ->
+                    {Transport1, Error}
+            end
     end.
+
+%% What has been read of a message: {Size, Chunks, Parts, PartsSize}. The
+%% parts read most recently are joined into a chunk once they add up to
+%% ?JSON_READ_CHUNK_SIZE bytes. Both lists are newest first.
+add_read(Data, {Size, Chunks, Parts, PartsSize}) ->
+    DataSize = byte_size(Data),
+    case PartsSize + DataSize >= ?JSON_READ_CHUNK_SIZE of
+        true ->
+            Chunk = iolist_to_binary(lists:reverse([Data | Parts])),
+            {Size + DataSize, [Chunk | Chunks], [], 0};
+        false ->
+            {Size + DataSize, Chunks, [Data | Parts], PartsSize + DataSize}
+    end.
+
+message_read({_Size, Chunks, Parts, _PartsSize}) ->
+    iolist_to_binary([lists:reverse(Chunks), lists:reverse(Parts)]).
 
 %% The fewest bytes that can still complete the message: a closing bracket
 %% for each open one, and the end of an open string, with the character an
@@ -659,15 +704,17 @@ read_message_begin(This0) ->
         )
     of
         {This1, {ok, [_, Version, Name, Type, SeqId]}} ->
-            case Version =:= ?VERSION_1 of
+            if
+                Version =/= ?VERSION_1 ->
+                    {This1, {error, no_json_protocol_version}};
+                byte_size(Name) > ?MAX_MESSAGE_NAME_SIZE ->
+                    {This1, {error, {message_name_exceeds_maximum, ?MAX_MESSAGE_NAME_SIZE}}};
                 true ->
                     {This1, #protocol_message_begin{
                         name = binary_to_list(Name),
                         type = Type,
                         seqid = SeqId
-                    }};
-                false ->
-                    {This1, {error, no_json_protocol_version}}
+                    }}
             end;
         Other ->
             Other
@@ -683,10 +730,10 @@ key_to_number(Key, Convert, Error) ->
 %%%% FACTORY GENERATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% returns a (fun() -> thrift_protocol())
-new_protocol_factory(TransportFactory, _Options) ->
-    % Only strice read/write are implemented
+new_protocol_factory(TransportFactory, Options) ->
+    MaxOptions = [Opt || is_list(Options), Opt = {max_message_size, _} <- Options],
     F = fun() ->
         {ok, Transport} = TransportFactory(),
-        thrift_json_protocol:new(Transport, [])
+        thrift_json_protocol:new(Transport, MaxOptions)
     end,
     {ok, F}.

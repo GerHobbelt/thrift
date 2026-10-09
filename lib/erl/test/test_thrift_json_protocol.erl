@@ -88,9 +88,12 @@ message(Name, Type, Value) ->
     {Protocol2, ok} = thrift_protocol:write(Protocol1, {Type, Value}),
     {Protocol3, ok} = thrift_protocol:write(Protocol2, message_end),
     {Protocol4, ok} = thrift_protocol:flush_transport(Protocol3),
-    {protocol, thrift_json_protocol, {json_protocol, Transport, _, _}} = Protocol4,
-    {t_transport, thrift_membuffer_transport, {t_membuffer, Bytes}} = Transport,
-    iolist_to_binary(Bytes).
+    iolist_to_binary(buffered(Protocol4)).
+
+%% What is left in the memory buffer under Protocol.
+buffered({protocol, thrift_json_protocol, State}) ->
+    {t_transport, thrift_membuffer_transport, {t_membuffer, Bytes}} = element(2, State),
+    Bytes.
 
 %% Reads a message of Type from Protocol: {Protocol, {Name, Value}}.
 read_message(Protocol0, Type) ->
@@ -216,6 +219,129 @@ read_calls_test_() ->
             Calls = meck:num_calls(thrift_membuffer_transport, read, '_'),
             ?assert(Calls < Size div 3)
         end)}.
+
+%%%% Message size %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% A message of exactly Size bytes, a string field making up the rest.
+message_of_size(Size) ->
+    Type = {struct, [{1, string}]},
+    Empty = byte_size(message("m", Type, {args, ""})),
+    message("m", Type, {args, binary:copy(<<"a">>, Size - Empty)}).
+
+%% Reads message_begin from Bytes: what it returned, and how many bytes it
+%% took from the transport.
+read_begin(Bytes, Options) ->
+    {ok, Transport} = thrift_membuffer_transport:new(Bytes),
+    {ok, Protocol0} = thrift_json_protocol:new(Transport, Options),
+    {Protocol1, Result} = thrift_protocol:read(Protocol0, message_begin),
+    {Result, byte_size(Bytes) - iolist_size(buffered(Protocol1))}.
+
+%% A message up to the max_message_size option is read. One a byte longer is
+%% refused before more than the maximum is taken from the transport.
+max_message_size_option_test() ->
+    Max = 4096,
+    ?assertEqual(Max, byte_size(message_of_size(Max))),
+    ?assertMatch(
+        {#protocol_message_begin{name = "m"}, Max},
+        read_begin(message_of_size(Max), [{max_message_size, Max}])
+    ),
+    {Result, Taken} = read_begin(message_of_size(Max + 1), [{max_message_size, Max}]),
+    ?assertEqual({error, {message_size_exceeds_maximum, Max}}, Result),
+    ?assert(Taken =< Max).
+
+%% Without the option, the thrift application's max_message_size applies.
+max_message_size_env_test_() ->
+    {setup,
+        fun() ->
+            ok = load_thrift_application(),
+            Saved = application:get_env(thrift, max_message_size),
+            ok = application:set_env(thrift, max_message_size, 4096),
+            Saved
+        end,
+        fun
+            (undefined) -> application:unset_env(thrift, max_message_size);
+            ({ok, Value}) -> application:set_env(thrift, max_message_size, Value)
+        end,
+        ?_test(begin
+            ?assertMatch(
+                {#protocol_message_begin{name = "m"}, 4096}, read_begin(message_of_size(4096), [])
+            ),
+            {Result, Taken} = read_begin(message_of_size(4097), []),
+            ?assertEqual({error, {message_size_exceeds_maximum, 4096}}, Result),
+            ?assert(Taken =< 4096),
+            %% The option takes the place of the application's setting.
+            ?assertMatch(
+                {#protocol_message_begin{name = "m"}, 8192},
+                read_begin(message_of_size(8192), [{max_message_size, 8192}])
+            )
+        end)}.
+
+%% A long message reads back the same, including the characters that decide
+%% where it ends, and the message after it is still there to be read.
+long_message_test() ->
+    Type = {struct, [{1, string}, {2, i32}]},
+    Text = binary:copy(list_to_binary(?AWKWARD), 20000),
+    First = message("first", Type, {args, Text, 1}),
+    Second = message("second", Type, {args, "]}\"[{", 2}),
+    {Protocol1, Read1} = read_message(new_protocol(<<First/binary, Second/binary>>), Type),
+    ?assertEqual({"first", {Text, 1}}, Read1),
+    {_, Read2} = read_message(Protocol1, Type),
+    ?assertEqual({"second", {<<"]}\"[{">>, 2}}, Read2).
+
+%%%% Memory %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% The largest heap, in words, a reader process gets for a message with a
+%% string of about two million characters: less than one list cell each.
+-define(READ_HEAP_WORDS, 4000000).
+
+%% A message with a long string, of every kind of character the reader
+%% handles, is read within ?READ_HEAP_WORDS.
+long_string_heap_test() ->
+    Type = {struct, [{1, string}]},
+    Text = binary:copy(list_to_binary(?AWKWARD), 80000),
+    Bytes = message("m", Type, {args, Text}),
+    Parent = self(),
+    {Pid, Ref} = spawn_opt(
+        fun() ->
+            {_, {"m", {Read}}} = read_message(new_protocol(Bytes), Type),
+            Parent ! {read, self(), Read =:= Text}
+        end,
+        [monitor, {max_heap_size, #{size => ?READ_HEAP_WORDS, kill => true, error_logger => false}}]
+    ),
+    receive
+        {read, Pid, Same} ->
+            erlang:demonitor(Ref, [flush]),
+            ?assert(Same);
+        {'DOWN', Ref, process, Pid, Reason} ->
+            ?assertEqual(read, {not_read, Reason})
+    after 60000 ->
+        exit(Pid, kill),
+        ?assert(false)
+    end.
+
+%% A number of more than 1024 characters is refused; one of 1024 is read.
+long_number_test() ->
+    Type = {struct, [{1, i64}]},
+    Message = fun(Digits) ->
+        iolist_to_binary([<<"[1,\"m\",1,42,{\"1\":{\"i64\":">>, Digits, <<"}}]">>])
+    end,
+    Longest = binary:copy(<<"1">>, 1024),
+    {_, {"m", {Value}}} = read_message(new_protocol(Message(Longest)), Type),
+    ?assertEqual(binary_to_integer(Longest), Value),
+    ?assertError(badarg, read_message(new_protocol(Message(<<Longest/binary, "1">>)), Type)).
+
+%% A message name up to ?MAX_MESSAGE_NAME_SIZE bytes is read; a longer one is
+%% refused by message_begin.
+message_name_test() ->
+    Type = {struct, [{1, string}]},
+    AtMax = lists:duplicate(?MAX_MESSAGE_NAME_SIZE, $n),
+    {_, {Name, _}} = read_message(new_protocol(message(AtMax, Type, {args, "x"})), Type),
+    ?assertEqual(AtMax, Name),
+    Over = message([$n | AtMax], Type, {args, "x"}),
+    ?assertMatch(
+        {_, {error, {message_name_exceeds_maximum, ?MAX_MESSAGE_NAME_SIZE}}},
+        thrift_protocol:read(new_protocol(Over), message_begin)
+    ).
 
 %%%% Over a socket %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

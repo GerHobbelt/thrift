@@ -75,8 +75,14 @@
 %% bindings use. Override with {thrift, [{max_frame_size, Bytes}]}.
 -define(DEFAULT_MAX_FRAME_SIZE, 16384000).
 
-%% The largest reply thrift_http_transport will read. Same value the other
+%% The largest message the binary, compact and JSON protocols will read, and
+%% the largest reply thrift_http_transport will read. Same value the other
 %% bindings use for their maximum message size. Override with
-%% {thrift, [{max_message_size, Bytes}]}, or for one transport with its
-%% max_message_size option.
+%% {thrift, [{max_message_size, Bytes}]}, or for one transport or protocol with
+%% its max_message_size option.
 -define(DEFAULT_MAX_MESSAGE_SIZE, (100 * 1024 * 1024)).
+
+%% The longest message name the binary, compact and JSON protocols will read.
+%% A name the processor can dispatch is a function name, an atom of at most
+%% 255 characters, after a service name and a ':' for a multiplexed service.
+-define(MAX_MESSAGE_NAME_SIZE, 4096).
