@@ -117,6 +117,25 @@ try {
         (@($dependencies | Where-Object { $_.id -eq 'vcredist140' }).Count -eq 1) `
         (($dependencies | ForEach-Object { $_.id }) -join ', ')
 
+    # The installed redistributable has to be at least as new as the build
+    # tools the compiler was built with. Without a minimum, any version that is
+    # already installed satisfies the dependency and is not updated.
+    $redist = @($dependencies | Where-Object { $_.id -eq 'vcredist140' }) | Select-Object -First 1
+    $redistMinimum = if ($redist) { [string]$redist.version } else { '' }
+    Assert-True 'the redistributable dependency names a minimum version' `
+        ($redistMinimum -match '^14\.\d+') "version '$redistMinimum'"
+
+    # Both package managers have to ask for the same runtime.
+    $wingetTemplate = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\winget\Apache.Thrift.installer.yaml.in') -Raw
+    $wingetMinimum = ([regex]::Match($wingetTemplate, "MinimumVersion:\s*'([^']*)'")).Groups[1].Value
+    Assert-True 'the minimum matches the one in the WinGet manifest' `
+        ([bool]$redistMinimum -and ($redistMinimum -eq $wingetMinimum)) "nuspec '$redistMinimum', WinGet '$wingetMinimum'"
+
+    # There is no square Thrift logo to point at, and Chocolatey flags a dead
+    # icon link.
+    Assert-True 'the nuspec names no icon' (-not $nuspec.package.metadata.iconUrl) `
+        ([string]$nuspec.package.metadata.iconUrl)
+
     $install = Get-Content -LiteralPath $installPath -Raw
     Assert-True 'the install script holds no placeholders' ($install -notmatch '__[A-Z0-9_]+__')
     Assert-True 'the checksum reaches the install script' ($install -match "checksum64\s*=\s*'$sha'")
@@ -150,11 +169,28 @@ try {
     Assert-True 'a given download URL is used' `
         ($customInstall -match "url64bit\s*=\s*'https://example\.invalid/thrift\.exe'")
 
+    # When the vote did not cover the installer, it is not on dist.apache.org,
+    # and the copy on the GitHub release is the one to download.
+    $github = & $builder -Version $version -Sha256 $sha -InstallerSource github `
+        -OutputDir (Join-Path $workDir 'github') -StageOnly | Select-Object -Last 1
+    $githubInstall = Get-Content -LiteralPath (Join-Path $github 'tools\chocolateyinstall.ps1') -Raw
+    $githubUrl = "https://github.com/apache/thrift/releases/download/v$version/thrift-$version-setup.exe"
+    Assert-True 'the download URL can be the asset on the GitHub release' `
+        ($githubInstall -match "url64bit\s*=\s*'$([regex]::Escape($githubUrl))'") $githubInstall
+
     Assert-Throws 'a version that is not major.minor.patch is refused' `
         { & $builder -Version '1.2' -Sha256 $sha -OutputDir (Join-Path $workDir 'bad1') -StageOnly } 'major.minor.patch'
 
     Assert-Throws 'a checksum that is not 64 hex digits is refused' `
         { & $builder -Version $version -Sha256 'nope' -OutputDir (Join-Path $workDir 'bad2') -StageOnly } 'hexadecimal'
+
+    # downloads.apache.org is the obvious third choice, and the wrong one.
+    Assert-Throws 'an unknown installer source is refused' `
+        { & $builder -Version $version -Sha256 $sha -InstallerSource downloads -OutputDir (Join-Path $workDir 'bad3') -StageOnly } 'does not belong to the set'
+
+    Assert-Throws 'an installer URL and an installer source together are refused' `
+        { & $builder -Version $version -Sha256 $sha -InstallerUrl 'https://example.invalid/thrift.exe' `
+            -InstallerSource github -OutputDir (Join-Path $workDir 'bad4') -StageOnly } 'not both'
 
     # ---- an already packed package, when one was given ---------------------
 
