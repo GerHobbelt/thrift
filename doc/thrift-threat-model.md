@@ -446,7 +446,7 @@ This is the section that defines what *won't* be a bug. Each item is paired with
 
 **D2. No application-layer authorization.** A peer that successfully completes TLS + SASL handshake is authorized to invoke any service method exposed via the processor. RBAC, per-method ACLs, scopes, rate-limits — all the application's job. *(maintainer — Q61.)*
 
-**D3. No defense against unbounded resource consumption when caps are not configured.** Default container/string size limit is `INT32_MAX` *(documented)*. An operator who runs an unconfigured `T*Server` on a public socket is exposed to "list of 2 billion `i32`" attacks; this is *(maintainer — Q62)* either `BY-DESIGN: property-disclaimed` (the default is dev-only and operators must flip it; the requirement appears in §10) or `VALID` (the default is the supported posture and the bug is in the default itself). Wave-1 question.
+**D3. No defense against unbounded resource consumption when caps are not configured.** Default container/string size limit is `INT32_MAX` *(documented)*. An operator who runs an unconfigured `T*Server` on a public socket is exposed to "list of 2 billion `i32`" attacks; this is *(maintainer — Q62)* either `BY-DESIGN: property-disclaimed` (the default is dev-only and operators must flip it; the requirement appears in §10) or `VALID` (the default is the supported posture and the bug is in the default itself). Wave-1 question. **Scope of the disclaimer, where it applies at all *(maintainer — Jens 2026-08-31)*:** whichever way Q62 resolves, the D3 disclaimer reaches only a cap that *exists, is documented, and is reachable on the path that performs the allocation*. What it disclaims is "we gave you a cap and you did not set it," not "there is no cap." An allocating path that exposes no such knob — or exposes one that cannot bind it, because it runs after the allocation — is not disposed of here: that is a §8 P10 finding with §6 cross-binding parity, and `VALID`.
 
 **D4. No defense against decompression bombs in `TZlibTransport`.** The transport has no documented decompressed-size cap. An attacker can ship a small compressed payload that expands to many GiB. *(maintainer — Q63.)* Standard "compression-oracle / compression-bomb" disclaimer for any compression layer (see Well-known attack classes below).
 
@@ -578,7 +578,7 @@ These are the patterns the model warns about — uses that the API allows but th
 
 These are the patterns a scanner, fuzzer, AI-assisted reviewer, or human reviewer is likely to flag against `apache/thrift` but that are **not** bugs given the model. Triagers can close each with the cited section.
 
-**N1. "Container-size field is read without an explicit upper bound in `T*Protocol::readListBegin`/`readMapBegin`/`readSetBegin`/`readBinary`."** Default cap **is** unlimited per spec *(documented — `doc/specs/thrift-binary-protocol.md`)*; the operator is documented as responsible for setting `setContainerSizeLimit` / `setStringSizeLimit`. → `BY-DESIGN: property-disclaimed` (§9 D3) unless wave-1 Q38 reclassifies the default as `VALID`.
+**N1. "Container-size field is read without an explicit upper bound in `T*Protocol::readListBegin`/`readMapBegin`/`readSetBegin`/`readBinary`."** Default cap **is** unlimited per spec *(documented — `doc/specs/thrift-binary-protocol.md`)*; the operator is documented as responsible for setting `setContainerSizeLimit` / `setStringSizeLimit`. → `BY-DESIGN: property-disclaimed` (§9 D3) unless wave-1 Q38 reclassifies the default as `VALID`. The same scope limit applies (§9 D3): N1 disclaims only where such a cap exists and is reachable on the allocating path — N1 rests on the operator being "documented as responsible for setting" one. A binding whose allocating path exposes no bindable cap is not an N1 non-finding; it routes to §8 P10 with §6, `VALID`.
 
 **N2. "Decompression in `TZlibTransport::read` has no size limit."** Zlib does not impose one; Thrift does not impose one. → `BY-DESIGN: property-disclaimed` (§9 D4).
 
@@ -591,6 +591,12 @@ These are the patterns a scanner, fuzzer, AI-assisted reviewer, or human reviewe
 **N6. "`assert` in test code or in `tutorial/`."** Out of scope per §3. → `OUT-OF-MODEL: unsupported-component`. (Note: `assert` for *security checks* in **runtime** code is `VALID` — CVE-2018-1320 — and the model distinguishes the two.)
 
 **N7. "TLS hostname verification is not performed by `TSSLSocket` constructor."** That is the documented contract (§9 F3); host-name check requires `AccessManager`. → `BY-DESIGN: property-disclaimed` unless the *operator's documented requirement* in §10 #11 wasn't met.
+
+**Scope — N7 covers a check that is not *enabled*, not one that is *disabled* or *botched*.** Two neighbouring shapes route the other way:
+- A binding that **overrides a secure default of its own TLS dependency** — setting `SSL_VERIFY_NONE` where the library defaults to verify-peer, say — removes **§8 P8** cert-chain validation, which §9 disclaims nowhere. F3 in fact presupposes it: it limits the disclaimer to "no host-name verification is performed *beyond cert-chain trust*". → `VALID`.
+- A **registered** `AccessManager` that answers `ALLOW` for a name the peer's certificate does not cover is §13's own worked example of a **§8 P9** violation. → `VALID`.
+
+N7 applies to the default construction of a binding that never promised the check. Nothing else.
 
 **N8. "Cleartext credentials in PLAIN SASL over `TSocket`."** SASL PLAIN over an unencrypted transport is application configuration; Thrift does not refuse the combination. → `BY-DESIGN: property-disclaimed` (§9 F5).
 
@@ -674,6 +680,7 @@ The closed set of outcomes a vulnerability report, tool finding, or AI analysis 
 - *"Test harness leaks the private key under `test/keys/server.key`."* → `OUT-OF-MODEL: unsupported-component` (§11a N5).
 - *"`AccessManager::verify` returns `ALLOW` when the cert is for `evil.example` but the client connected to `bank.example`."* → `VALID` (§8 P9 — if the `AccessManager` *is* registered and the contract is misimplemented).
 - *"`TSSLSocket` accepts a cert for `evil.example` when no `AccessManager` is registered."* → `BY-DESIGN: property-disclaimed` (§9 F3, §11a N7).
+- *"A binding passes `SSL_VERIFY_NONE` to its TLS library, overriding that library's verify-peer default."* → `VALID` (§8 P8; §11a N7 covers not enabling a check, not disabling one).
 - *"Recursive `skip` of nested unknown structs blows the stack."* → `VALID` (§8 P1 violation; §11a N4 — historical class).
 - *"`thrift -gen java:bean` produces a struct that ignores `optional` semantics."* → likely `MODEL-GAP` (codegen correctness); routes to §12 #10 unless the PMC ratifies a P5-extension property.
 - *"The IDL compiler crashes on a `.thrift` file containing 200 nested `include` directives."* → `OUT-OF-MODEL: trusted-input` (§3 #8).
@@ -1366,10 +1373,23 @@ The pre-allocation (immediately follows the check):
 - Java: new ArrayList<>(declaredCount) → same pattern (NestedListsI32x3.java:350)
 - Go: make([]T, 0, declaredCount) → allocates backing array of that capacity
 
-C++ cumulative vs. Go per-field:
+Per-transport message-size accounting — C++/Java are not uniformly "cumulative":
 
-C++/Java use a decreasing remainingMessageSize_ counter — each wire byte consumed reduces the budget. Go's checkSizeForProtocol compares against the full maxMessageSize each
-time (configuration.go:319–333), not a running remainder. A Go struct with k list fields can each declare maxMessageSize / 1 elements independently.
+The remainingMessageSize_ counter is only *decremented* by some transports, and not on the primary network read path. In C++, countConsumedMessageBytes() (the decrement) is
+protected and reached from only three places: the in-memory buffer's consume()/borrow path (TBufferTransports.h), TZlibTransport, and the framed updateKnownMessageSize() reset.
+A plain TSocket::read() — and likewise TSSLSocket, THttpTransport, TFDTransport, TPipe — calls checkReadBytesAvailable(len) against the full maxMessageSize before each read but
+never decrements, so remainingMessageSize_ stays pegged at maxMessageSize for the whole message. In Java, TIOStreamTransport.read() (the socket/stream base) performs no per-read
+accounting at all — it neither checks nor decrements; only TMemoryInputTransport / AutoExpandingBufferReadTransport and the framed path decrement.
+
+Consequently, on the default socket path the size cap for both C++ and Java is enforced by the *protocol-level* guard — checkReadBytesAvailable(fieldSize) — comparing each field
+against the full, undecremented maxMessageSize (exactly the "checkReadBytesAvailable(N × 1) passes when N ≤ M" behaviour clause 2 relies on below). That is structurally
+per-field, the same as Go — not a cumulative running remainder. Go's checkSizeForProtocol likewise compares against the full maxMessageSize each time (configuration.go:319–333);
+a struct with k list fields can each declare maxMessageSize / 1 elements independently — and, per the above, C++/Java over a plain socket permit that same per-field independence.
+The cumulative-remainder behaviour applies only to the in-memory buffer, zlib, and framed transports, where the counter is actually drawn down.
+
+The cumulative counter bounds the bytes actually consumed, not the capacity reserved, and on the pre-allocation path the reservation runs first. checkReadBytesAvailable(declaredCount × minSize) is a pure comparison — it throws when remainingMessageSize_ < numBytes but does not itself decrement the budget (C++ TTransport.h:286; Java TEndpointTransport). Only reading the elements' bytes decrements it, and the reservation is made before any element is read, so the running remainder never sees the reservation.
+
+Whether the check re-offers the full maxMessageSize then turns on whether the transport narrows the budget to the real message length. Only the transports that call updateKnownMessageSize do so — the framed and in-memory ones (C++ TBufferTransports; Java TFramedTransport, TMemoryInputTransport, TMemoryBuffer, TByteBuffer). A plain unframed socket (C++ TSocket / TIOStreamTransport, Java TSocket) never calls it, so remainingMessageSize_ stays at maxMessageSize however few bytes have arrived, and the check is re-offered in full at every nesting level and every sibling field. Go re-offers on every transport (it keeps no running remainder at all); Java and C++ re-offer only on the transports that never narrow — which is the default unframed path. Over a framed or in-memory transport the budget is the body length and the amplification collapses to the constant-factor form below.
 
 ---
 Evaluation of the three clauses
@@ -1398,6 +1418,8 @@ For list<LargeStruct> with maxMessageSize = M:
 
 If sizeof(LargeStruct) = 200 bytes: a 100 MB cap permits a 20 GB allocation from a single list field. This is "constant-factor" in the policy's sense (the constant is fixed per
  schema), but it can be 100–10,000× depending on the struct.
+
+Measured on the default unframed path (schema struct Obj { 1: list<Obj> objects; }, binary protocol, maxMessageSize at its 100 MB default). A single list field whose header declares 100,000,000 elements passes checkReadBytesAvailable(100,000,000 × 1) and reserves about 400 MB in Java (100M four-byte references) from a few-byte header, with no nesting. Because the budget is re-offered per level on an unframed transport, nesting to the recursion limit multiplies that: a roughly 384-byte message reserves about 25.6 GB in Java (OOM under -Xmx8g) and about 153.6 GB in C++ — the C++ figure larger because resize(N) value-initialises N × sizeof(element) rather than reserving N references, so the large allocation surfaces as std::bad_alloc rather than a contained OutOfMemoryError. Over a framed or in-memory transport the same message is bounded by its body length and the factor collapses to the sizeof(in-memory-type) / getMinSerializedSize(wire-type) form above.
 
 An additional complicating factor: C++ binary protocol has a separate container_limit_ (per-collection element count cap, TBinaryProtocol.h:48,66) that defaults to 0
 (disabled). The checkReadBytesAvailable path and the container_limit_ path are independent guards. The message-size cap alone is not sufficient to bound memory if struct
@@ -1440,8 +1462,9 @@ The policy is acceptable as a categorical line with three required qualification
 1. Carve out O(N log N) for ordered containers (std::map/std::set CPU): this is inherent data structure complexity, not a Thrift amplification bug.
 2. Note that "constant-factor" is schema-dependent and can be 100–10,000× for struct-element collections under binary protocol; container_limit_ (C++) is the additional lever,
 not just maxMessageSize.
-3. Note framed transports cannot hang on this path regardless of cap setting, and that Go's cap check is per-field (not cumulative), which the policy's "single field" framing
-happens to fit but for different structural reasons than C++/Java.
+3. Note framed transports cannot hang on this path regardless of cap setting, and that Go's cap check is per-field (not cumulative) — as is the C++/Java check on a plain socket,
+where nothing decrements remainingMessageSize_ (see "Per-transport message-size accounting" above); only the in-memory/zlib/framed transports of C++/Java draw the budget down
+cumulatively. The policy's "single field" framing fits all three.
 
 
 **Q60.** **(Codegen determinism.)** 

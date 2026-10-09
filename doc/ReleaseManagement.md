@@ -214,11 +214,16 @@ All Apache Thrift releases go through a 72-hour final release candidate voting p
             This needs [Inno Setup](https://jrsoftware.org/isdl.php) 6.3 or later.  The result is
             `dist\thrift-1.0.0-setup.exe`.
 
-            Rather than installing Inno Setup, you can run the
-            [`Windows packages`](../.github/workflows/windows-packages.yml) workflow against the
-            release branch from the Actions tab and download its `windows-installer` artifact.  The
-            workflow builds the compiler the same way and also installs and uninstalls the result to
-            check it.
+            Rather than installing Inno Setup, you can have the
+            [`Windows packages`](../.github/workflows/windows-packages.yml) workflow build it around
+            the signed executable.  Upload the executable with its signature and checksums to the
+            release candidate's directory first (next step), then run the workflow from the release
+            branch on the Actions tab, with `compiler_url` set to the executable's URL there, for
+            example `https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0.exe`.  It
+            checks the checksum and the signature against `KEYS`, packages exactly that file,
+            installs and uninstalls the result to check it, and leaves the installer as its
+            `windows-installer` artifact.  Its own build of the compiler, which it uses without
+            `compiler_url`, will not do: that is not the executable you signed.
         1. Copy the installer to your linux system and sign and checksum it the same way you signed
             the tarball and the executable.
 
@@ -262,14 +267,14 @@ All Apache Thrift releases go through a 72-hour final release candidate voting p
 
     I propose that we accept the following release candidate as the official Apache Thrift 1.0.0 release:
 
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0.tar.gz
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0.tar.gz
 
     The release candidate was created from the release/1.0.0 branch and can be cloned using:
 
     git clone -b release/1.0.0 https://github.com/apache/thrift.git
 
     The release candidates GPG signature can be found at:
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0.tar.gz.asc
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0.tar.gz.asc
 
     The release candidates checksums are:
     sha256: 
@@ -277,10 +282,10 @@ All Apache Thrift releases go through a 72-hour final release candidate voting p
 
 
     A prebuilt Windows compiler is available at:
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0.exe
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0.exe
 
     Prebuilt Windows compiler GPG signature:
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0.exe.asc
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0.exe.asc
 
     Prebuilt Windows compiler checksums are:
     sha256: 
@@ -288,10 +293,10 @@ All Apache Thrift releases go through a 72-hour final release candidate voting p
 
 
     A Windows installer for the compiler is available at:
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0-setup.exe
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-setup.exe
 
     Windows installer GPG signature:
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0-setup.exe.asc
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-setup.exe.asc
 
     Windows installer checksums are:
     sha256: 
@@ -299,10 +304,10 @@ All Apache Thrift releases go through a 72-hour final release candidate voting p
 
     
     The source tree as ZIP file to be published via Github releases:
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0.zip
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0.zip
 
     ZIP source tree GPG signature:
-    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0-rc0.zip.asc
+    https://dist.apache.org/repos/dist/dev/thrift/1.0.0-rc0/thrift-1.0.0.zip.asc
 
     ZIP source tree checksums are:
     sha256: 
@@ -489,18 +494,28 @@ from `dist.apache.org`.  The file the vote covers has to carry a release
 manager's signature, so it cannot be produced by a workflow at release time.
 
 What *is* automated is building and testing it.  The
-[`Windows packages`](../.github/workflows/windows-packages.yml) workflow builds
-the compiler on a Windows runner the way a release build does, checks what the
-executable imports, packages it with Inno Setup, and then installs and
-uninstalls the result to check that the compiler runs, that the install
-directory lands on `PATH`, and that uninstalling takes that one `PATH` entry
-away and leaves the others alone.  It runs on every pull request that touches
-the packaging, and on demand from the Actions tab - which is how you get the
-artifact to sign while preparing the release candidate, described above under
-*Generate the Windows Thrift Compiler*.
+[`Windows packages`](../.github/workflows/windows-packages.yml) workflow checks
+what the executable imports, packages it with Inno Setup, and then installs and
+uninstalls the result to check that the compiler runs, that the installed
+`thrift.exe` is the very file it was given, that the install directory lands on
+`PATH`, and that uninstalling takes that one `PATH` entry away and leaves the
+others alone.  Which executable it packages depends on how it runs:
 
-When the GitHub release is published, the same workflow attaches an installer to
-it as an unsigned convenience copy, so that the download link is there
+* For a pull request that touches the packaging, and from the Actions tab
+  without `compiler_url`, it builds the compiler on a Windows runner the way a
+  release build does.
+* From the Actions tab with `compiler_url`, it packages the signed executable
+  at that URL on `dist.apache.org` - which is how you get the installer to sign
+  while preparing the release candidate, described above under *Generate the
+  Windows Thrift Compiler*.
+* When the GitHub release is published, it packages the voted executable from
+  `dist/release`.
+
+A downloaded executable is used only once its checksums match and its
+signature checks out against `KEYS`.
+
+When the GitHub release is published, the workflow attaches the installer to it
+as an unsigned convenience copy, so that the download link is there
 immediately.  **One thing is left to do after the release:** overwrite that asset
 with the signed file from `dist/release`, so that what people download from
 GitHub is what the signatures on `dist.apache.org` cover.
@@ -513,15 +528,17 @@ If the installer was not part of the release candidate, it is missing from
 `dist/release` too, and the Chocolatey and WinGet runs of the release fail to
 download it.  To add it afterwards:
 
-1. Build it from the voted compiler, with Inno Setup 6.3 or later, in a checkout
-   of the release tag, which provides the `LICENSE` and `NOTICE` it installs:
+1. Build it around the voted compiler.  Run the `Windows packages` workflow from
+   the Actions tab with `compiler_url` set to the executable in `dist/release`,
+   for example `https://dist.apache.org/repos/dist/release/thrift/1.0.0/thrift-1.0.0.exe`,
+   and take its `windows-installer` artifact.  It installs the `LICENSE` and
+   `NOTICE` of the release tag.  To build it yourself instead, use Inno Setup
+   6.3 or later in a checkout of the release tag:
 
     ```powershell
     PS C:\thrift> .\build\windows\build-installer.ps1 -Version 1.0.0 -Compiler C:\dist\thrift-1.0.0.exe -OutputDir dist
     ```
 
-    The `windows-installer` artifact of the `Windows packages` workflow will not
-    do: it contains a compiler that the workflow built itself, not the voted one.
 1. Sign and checksum it the same way as the other release artifacts, and commit
    it with its signature and checksums to `dist/release/thrift/1.0.0`.
 1. Overwrite the asset on the GitHub release with it, as shown above.
@@ -589,14 +606,24 @@ See https://thrift.apache.org/lib/ for the current status of each external packa
   * Run "pub publish" and go through the google account authorization to allow it.
 * [dlang] Within a day, the dlang dub site https://code.dlang.org/packages/apache-thrift?tab=info
   should pick up the release based on the tag.  No action is needed.
-* [npmjs] @jfarrell is the only one who can do this right now.
-    https://issues.apache.org/jira/browse/THRIFT-4688
+* [npmjs]
+  - navigate to thrift release folder, stay at ROOT
+  - enter: `npm publish . --access public --dry-run`
+  - when happy: `npm publish . --access public`
+  - hold OTP device ready
+  - goto https://www.npmjs.com/package/thrift
+  - switch to "versions" and hit F5 a few times until the release is listed as "latest"
 * [nuget] The `.NET tool` GitHub Actions workflow publishes
   [`Apache.Thrift.Compiler`](https://www.nuget.org/packages/Apache.Thrift.Compiler/) when the
   GitHub release is published.  This is the Windows compiler packaged as a .NET tool, so that it
   can be installed with `dotnet tool install --global Apache.Thrift.Compiler`.  It is not the
   `ApacheThrift` runtime library, which is still published by hand following the instructions in
   `ApacheThrift.nuspec`.
+  * The package carries the voted `thrift-<version>.exe` from `dist/release`, not a new build.
+    The workflow downloads it and checks its checksums and its signature against `KEYS` first;
+    if that fails, nothing is packed or published.  To check the package beforehand, for example
+    around a release candidate's executable, start the workflow from the Actions tab with
+    `compiler_url` set to that executable on `dist.apache.org`.  A manual run never publishes.
   * Before publishing, verify that nuget.org has a trusted publishing policy for the
     `apache/thrift` repository, the `.github/workflows/dotnet-tool.yml` workflow and the
     `release` environment, and that the repository variable `NUGET_USER` names the nuget.org
