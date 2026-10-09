@@ -93,7 +93,7 @@ Sample:
 ");
         }
 
-        public static async Task Main(string[] args)
+        public static async Task<int> Main(string[] args)
         {
             args ??= [];
 
@@ -101,17 +101,18 @@ Sample:
             if (args.Any(x => x.Equals("-help") || x.Equals("--help") || x.Equals("-h") || x.Equals("-?")))
             {
                 DisplayHelp();
-                return;
+                return 0;
             }
 
             Logger.LogInformation("Starting client...");
 
             using var source = new CancellationTokenSource();
-            await RunAsync(args, source.Token);
+            var succeeded = await RunAsync(args, source.Token);
+            return succeeded ? 0 : 1;
         }
 
         
-        private static async Task RunAsync(string[] args, CancellationToken cancellationToken)
+        private static async Task<bool> RunAsync(string[] args, CancellationToken cancellationToken)
         {
             var numClients = GetNumberOfClients(args);
 
@@ -122,7 +123,6 @@ Sample:
             if (Logger.IsEnabled(LogLevel.Information))
                 Logger.LogInformation("Selected client transport: {transport}", transport);
 
-            var protocol = MakeProtocol( args, MakeTransport(args));
             if (Logger.IsEnabled(LogLevel.Information))
                 Logger.LogInformation("Selected client protocol: {GetProtocol(args)}", GetProtocol(args));
 
@@ -130,14 +130,17 @@ Sample:
             if (Logger.IsEnabled(LogLevel.Information))
                 Logger.LogInformation("Multiplex {mplex}", mplex);
 
-            var tasks = new Task[numClients];
+            var tasks = new Task<bool>[numClients];
             for (int i = 0; i < numClients; i++)
             {
+                // each client gets a transport and protocol of its own
+                var protocol = MakeProtocol(args, MakeTransport(args));
                 var task = RunClientAsync(protocol, mplex, cancellationToken);
                 tasks[i] = task;
             }
 
             Task.WaitAll(tasks, cancellationToken);
+            return tasks.All(task => task.Result);
         }
 
         private static bool GetMultiplex(string[] args)
@@ -306,7 +309,7 @@ Sample:
             };
         }
 
-        private static async Task RunClientAsync(TProtocol protocol, bool multiplex, CancellationToken cancellationToken)
+        private static async Task<bool> RunClientAsync(TProtocol protocol, bool multiplex, CancellationToken cancellationToken)
         {
             try
             {
@@ -317,6 +320,7 @@ Sample:
 
                     var client = new Calculator.Client(protocol);
                     await ExecuteCalculatorClientOperations(client, cancellationToken);
+                    return true;
                 }
                 catch (Exception ex)
                 {
@@ -333,6 +337,7 @@ Sample:
                 if (Logger.IsEnabled(LogLevel.Error))
                     Logger.LogError("{x}",x);
             }
+            return false;
         }
 
         private static async Task ExecuteCalculatorClientOperations( Calculator.Client client, CancellationToken cancellationToken)

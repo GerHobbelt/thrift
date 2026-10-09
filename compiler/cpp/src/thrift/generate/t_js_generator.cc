@@ -1425,9 +1425,14 @@ void t_js_generator::generate_service(t_service* tservice) {
 
   if (gen_node_) {
     if (tservice->get_extends() != nullptr) {
-      f_service_ << js_const_type_ <<  tservice->get_extends()->get_name() << " = require('"
-                 << get_import_path(tservice->get_extends()) << "');" << '\n' << js_const_type_
-                 << tservice->get_extends()->get_name()
+      if (gen_esm_) {
+        f_service_ << "import * as " << tservice->get_extends()->get_name() << " from '"
+                   << get_import_path(tservice->get_extends()) << "';" << '\n';
+      } else {
+        f_service_ << js_const_type_ << tservice->get_extends()->get_name() << " = require('"
+                   << get_import_path(tservice->get_extends()) << "');" << '\n';
+      }
+      f_service_ << js_const_type_ << tservice->get_extends()->get_name()
                  << "Client = " << tservice->get_extends()->get_name() << ".Client;" << '\n'
                  << js_const_type_ << tservice->get_extends()->get_name()
                  << "Processor = " << tservice->get_extends()->get_name() << ".Processor;" << '\n';
@@ -2274,14 +2279,10 @@ void t_js_generator::generate_service_client(t_service* tservice) {
     indent_up();
     if (gen_node_) {
       f_service_ << indent() << "delete this._reqs[this.seqid()];" << '\n';
-      f_service_ << indent() << "if (typeof " << outputVar << ".reset === 'function') {" << '\n';
-      f_service_ << indent() << "  " << outputVar << ".reset();" << '\n';
-      f_service_ << indent() << "}" << '\n';
-    } else {
-      f_service_ << indent() << "if (typeof " << outputVar << ".getTransport().reset === 'function') {" << '\n';
-      f_service_ << indent() << "  " << outputVar << ".getTransport().reset();" << '\n';
-      f_service_ << indent() << "}" << '\n';
     }
+    f_service_ << indent() << "if (typeof " << outputVar << ".getTransport().reset === 'function') {" << '\n';
+    f_service_ << indent() << "  " << outputVar << ".getTransport().reset();" << '\n';
+    f_service_ << indent() << "}" << '\n';
     f_service_ << indent() << "throw e;" << '\n';
     indent_down();
     f_service_ << indent() << "}" << '\n';
