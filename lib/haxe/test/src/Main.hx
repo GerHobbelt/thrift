@@ -27,8 +27,11 @@ import org.apache.thrift.transport.*;
 import tests.ConstantsTest;
 import tests.MultiplexTest;
 import tests.FramedTransportTest;
+import tests.JSONLimitTest;
 import tests.RecursionLimitTest;
+import tests.SkipTest;
 import tests.StreamTest;
+import tests.TransportPartialReadTest;
 import thrift.test.*;
 
 enum WhatTests
@@ -89,8 +92,11 @@ class Main
 				case Normal:
 					#if sys
 					tests.StreamTest.Run(server);
+					tests.TransportPartialReadTest.Run(server);
 					tests.RecursionLimitTest.Run(server);
+					tests.SkipTest.Run(server);
 					tests.FramedTransportTest.Run(server);
+					tests.JSONLimitTest.Run(server);
 					#end
 				case Multiplex:
 					#if ! (flash || html5 || js)
