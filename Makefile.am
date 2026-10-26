@@ -140,6 +140,7 @@ distdir:
 
 EXTRA_DIST = \
 	.asf.yaml \
+	.cargo/config.toml \
 	.clang-format \
 	.dockerignore \
 	.editorconfig \
