@@ -41,6 +41,7 @@ py3-test: py3-build
 	$(PYTHON3) test/test_recursion_depth.py
 	$(PYTHON3) test/test_container_sizing.py
 	$(PYTHON3) test/test_protocol_string_length_limit.py
+	$(PYTHON3) test/test_json_protocol_malformed.py
 	$(PYTHON3) test/test_framed_frame_size.py
 	$(PYTHON3) test/test_sasl_frame_size.py
 	$(PYTHON3) test/test_sasl_transport.py
@@ -82,9 +83,11 @@ check-local: all py3-test
 	$(PYTHON) test/test_http_server_content_length.py
 	$(PYTHON) test/thrift_TSerializer.py
 	THRIFT=${THRIFT} $(PYTHON) test/test_compiler/test_keyword_escape.py
+	THRIFT=${THRIFT} $(PYTHON) test/test_compiler/test_default_struct.py
 	$(PYTHON) test/test_recursion_depth.py
 	$(PYTHON) test/test_container_sizing.py
 	$(PYTHON) test/test_protocol_string_length_limit.py
+	$(PYTHON) test/test_json_protocol_malformed.py
 	$(PYTHON) test/test_framed_frame_size.py
 	$(PYTHON) test/test_sasl_frame_size.py
 	$(PYTHON) test/test_sasl_transport.py
